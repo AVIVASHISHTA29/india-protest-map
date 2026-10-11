@@ -79,13 +79,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .marker{cursor:pointer;outline:none}
 .marker:focus-visible .core{stroke:var(--focus);stroke-width:3}
 .marker .core{stroke:var(--panel);stroke-width:1.5;vector-effect:non-scaling-stroke}
-.marker.old .core{opacity:.55}
-.marker.ongoing .core{fill:none !important;stroke-width:2.5;stroke-dasharray:3 2}
-.marker.live .core{fill-opacity:.85;stroke-width:1}
+.marker.live .core{fill-opacity:.72;stroke-width:1}
 .marker.live.weak .core{fill-opacity:.4}
-.marker.sel .core{stroke:var(--ink);stroke-width:2.5}
+.marker.old .core{fill-opacity:.55}
+.marker.ongoing .core{fill:none !important;stroke-width:2.5;stroke-dasharray:3 2}
+.marker.sel .core{stroke:var(--ink);stroke-width:2.5;fill-opacity:1}
+.marker:hover .core{fill-opacity:1}
+.marker .n{fill:#fff;font-family:var(--body);font-weight:600;text-anchor:middle;pointer-events:none}
+.place{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 20px;border-bottom:1px solid var(--line);font-size:.9rem;position:sticky;top:0;background:var(--panel);z-index:1}
+.place button{border:1px solid var(--line);background:transparent;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:.82rem;flex:none}
 .pulse{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;opacity:0;animation:pulse 2.4s ease-out infinite}
-@keyframes pulse{0%{opacity:.7;transform:scale(.6)}100%{opacity:0;transform:scale(2.6)}}
+@keyframes pulse{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(2.4)}}
 @media (prefers-reduced-motion:reduce){.pulse{animation:none;display:none}}
 .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:.8rem;padding:3px 8px;border-radius:4px;white-space:nowrap;transform:translate(-50%,calc(-100% - 12px));display:none}
 
@@ -173,7 +177,7 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
     <div class="foot">
       <div class="keys">
         <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="5" fill="currentColor"/></svg>Checked entry</span>
-        <span><svg width="12" height="12" viewBox="-6 -6 12 12"><path d="M0,-5.5L5.5,0L0,5.5L-5.5,0Z" fill="currentColor"/></svg>Auto-detected from news</span>
+        <span><svg width="12" height="12" viewBox="-6 -6 12 12"><circle r="5" fill="currentColor" fill-opacity=".55"/></svg>Auto-detected from news</span>
       </div>
       Checked entries are researched by hand. News detections come from the GDELT event database, which machine-reads global news. They can include duplicates, wrong locations or stories about older protests, so open the sources before sharing.
     </div>
@@ -344,57 +348,81 @@ function visible(){
 }
 const isRecent = e => !e.ongoing && ageDays(e.date) <= 2;
 
-/* ---------- Render ---------- */
+/* ---------- Render ----------
+   Reports at the same spot are merged into one dot (sized by count) rather than
+   nudged apart, so every dot stays at its true location. Clicking a dot filters
+   the list to that place. */
 const tip = document.getElementById("tip");
-function markerShape(d){
-  const r = d.ongoing?7:d.live?(d.weak?4:4.5+Math.min(3,Math.log2(1+(d.outlets||1)))):isRecent(d)?6.5:5.5;
-  if (!d.live) return `M${-r},0a${r},${r} 0 1,0 ${2*r},0a${r},${r} 0 1,0 ${-2*r},0Z`;
-  const q = r*Math.sqrt(Math.PI/2); // diamond with the same area as the circle
-  return `M0,${-q}L${q},0L0,${q}L${-q},0Z`;
+let placeFilter = null, groups = new Map();
+function groupEvents(ev){
+  const out = new Map();
+  for (const e of ev){
+    const [x,y] = project(e.lng,e.lat);
+    const key = Math.round(x)+","+Math.round(y); // ~3 km grid: same reported place
+    e._x = x; e._y = y; e._g = key;
+    let g = out.get(key);
+    if (!g) out.set(key, g = {key, x, y, events:[]});
+    g.events.push(e);
+  }
+  for (const g of out.values()){
+    g.lead = g.events[0]; // visible() order: checked entries and newest first
+    g.checked = g.events.some(e=>!e.live && !e.ongoing);
+    g.ongoing = g.events.every(e=>e.ongoing);
+    g.weak = g.events.every(e=>e.weak);
+    g.recent = g.events.some(e=>!e.live && isRecent(e));
+    g.old = !g.ongoing && !g.events.some(e=>isRecent(e));
+  }
+  return out;
 }
-function makeMarker(d){
+const dotR = g => g.ongoing ? 7 : Math.min(14, (g.checked?5.5:4.5) + 1.9*Math.sqrt(g.events.length-1));
+function makeMarker(){
   const m = document.createElementNS(NS,"g");
   m.setAttribute("tabindex",0); m.setAttribute("role","button");
   const pulse = document.createElementNS(NS,"circle"); pulse.setAttribute("class","pulse"); pulse.setAttribute("r",6);
-  const core = document.createElementNS(NS,"path"); core.setAttribute("class","core");
-  m.append(pulse, core);
-  m.addEventListener("click",()=>{ if(!dragMoved) select(m.__d.id,true); });
-  m.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();select(m.__d.id,true);} });
-  m.addEventListener("pointerenter",e=>{ if(e.pointerType!=="mouse") return; const d=m.__d; tip.textContent=d.city+(d.venue&&d.venue!=="Nationwide"?", "+d.venue:""); tip.style.display="block"; });
+  const core = document.createElementNS(NS,"circle"); core.setAttribute("class","core");
+  const label = document.createElementNS(NS,"text"); label.setAttribute("class","n"); label.setAttribute("dy",".35em");
+  m.append(pulse, core, label);
+  m.addEventListener("click",e=>{ e.stopPropagation(); if(!dragMoved) openGroup(m.__g.key); });
+  m.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();openGroup(m.__g.key);} });
+  m.addEventListener("pointerenter",e=>{ if(e.pointerType!=="mouse") return; tip.textContent=groupLabel(m.__g); tip.style.display="block"; });
   m.addEventListener("pointermove",e=>{ const r=svg.getBoundingClientRect(); tip.style.left=(e.clientX-r.left)+"px"; tip.style.top=(e.clientY-r.top)+"px"; });
   m.addEventListener("pointerleave",()=>tip.style.display="none");
   return m;
 }
+function groupLabel(g){
+  const d = g.lead, place = d.city+(d.venue&&d.venue!=="Nationwide"?", "+d.venue:"");
+  return g.events.length>1 ? `${place} · ${g.events.length} reports` : place;
+}
 const markerEls = new Map();
 function render(){
-  const ev = visible(), seen = {}, u0 = Math.max(VB0.w/(svg.clientWidth||1), VB0.h/(svg.clientHeight||1));
-  ev.forEach(e=>{
-    const [x,y] = project(e.lng,e.lat); const key = Math.round(x/(6*u0))+","+Math.round(y/(6*u0));
-    const n = seen[key] = (seen[key]||0)+1; const a = n*2.1;
-    e._x = x + (n>1? Math.cos(a)*1.6*n*u0 : 0); e._y = y + (n>1? Math.sin(a)*1.6*n*u0 : 0);
-  });
-  const keep = new Set();
-  const frag = [];
-  for (const d of ev.slice().reverse()){ // draw newest last so it sits on top
-    let m = markerEls.get(d.id);
-    if (!m){ m = makeMarker(d); markerEls.set(d.id,m); }
-    m.__d = d; keep.add(d.id); frag.push(m);
-    const color = colorOf(d.movement);
-    m.setAttribute("class","marker"+(d.ongoing?" ongoing":"")+(d.live?" live":"")+(d.weak?" weak":"")+(!isRecent(d)&&!d.ongoing&&!d.live?" old":"")+(d.id===selected?" sel":""));
-    m.setAttribute("aria-label",`${d.title}, ${d.city}`);
-    const core = m.lastChild, pulse = m.firstChild;
-    core.setAttribute("d",markerShape(d)); core.setAttribute("fill",color); core.style.stroke = d.ongoing?color:"";
-    pulse.setAttribute("stroke",color); pulse.style.display = isRecent(d)&&!d.live?"":"none";
+  const ev = visible();
+  groups = groupEvents(ev);
+  if (placeFilter && !groups.has(placeFilter)) placeFilter = null;
+  const selGroup = placeFilter || ev.find(e=>e.id===selected)?._g;
+  const keep = new Set(), frag = [];
+  // big dots first so small ones on top stay clickable; checked entries above detections
+  const order = [...groups.values()].sort((a,b)=>(a.checked-b.checked) || dotR(b)-dotR(a));
+  for (const g of order){
+    let m = markerEls.get(g.key);
+    if (!m){ m = makeMarker(); markerEls.set(g.key,m); }
+    m.__g = g; m.__d = {_x:g.x, _y:g.y}; keep.add(g.key); frag.push(m);
+    const color = colorOf(g.lead.movement), r = dotR(g), n = g.events.length;
+    m.setAttribute("class","marker"+(g.ongoing?" ongoing":"")+(g.checked?" checked":" live")+(g.weak?" weak":"")+(g.old&&g.checked?" old":"")+(g.key===selGroup?" sel":""));
+    m.setAttribute("aria-label",groupLabel(g));
+    const [pulse, core, label] = m.children;
+    core.setAttribute("r",r); core.setAttribute("fill",color); core.style.stroke = g.ongoing?color:"";
+    pulse.setAttribute("stroke",color); pulse.setAttribute("r",r); pulse.style.display = g.recent?"":"none";
+    label.textContent = n>1 && r>=8 ? n : ""; label.style.fontSize = Math.max(8, r*.95)+"px";
   }
-  for (const [id,m] of markerEls) if (!keep.has(id)){ m.remove(); markerEls.delete(id); }
+  for (const [k,m] of markerEls) if (!keep.has(k)){ m.remove(); markerEls.delete(k); }
   gMarks.replaceChildren(...frag);
-  scaleMarks(); renderList(ev); renderLegend();
+  scaleMarks(); renderList(placeFilter ? groups.get(placeFilter).events : ev, ev); renderLegend();
 }
 
-function renderList(ev){
+function renderList(ev, all){
   const list = document.getElementById("list");
-  const checked = ev.filter(e=>!e.ongoing && !e.live).length, det = ev.filter(e=>e.live).length, ong = ev.filter(e=>e.ongoing).length;
-  const places = new Set(ev.filter(e=>!e.ongoing).map(e=>e.city.split(",")[0])).size;
+  const checked = all.filter(e=>!e.ongoing && !e.live).length, det = all.filter(e=>e.live).length, ong = all.filter(e=>e.ongoing).length;
+  const places = new Set(all.filter(e=>!e.ongoing).map(e=>e.city.split(",")[0])).size;
   const parts = [];
   if (checked) parts.push(`<b>${checked}</b> checked protest${checked>1?"s":""}`);
   if (det) parts.push(`<b>${det}</b> news detection${det>1?"s":""}`);
@@ -402,7 +430,8 @@ function renderList(ev){
     ? parts.join(" and ")+` across <b>${places}</b> place${places>1?"s":""}`+(ong?`, plus ${ong} long-running movement${ong>1?"s":""}`:"")
     : "No dated protests in this range.";
   if (!ev.length){ list.innerHTML = `<div class="empty">Nothing matches. Widen the time range or turn an issue back on.</div>`; return; }
-  list.innerHTML = ev.slice(0,400).map(e=>{
+  const head = placeFilter ? `<div class="place"><span><b>${esc(groupLabel(groups.get(placeFilter)))}</b></span><button id="clearPlace">Show all places</button></div>` : "";
+  list.innerHTML = head + ev.slice(0,400).map(e=>{
     const srcs = (e.sources||[]).map(s=>{const u=safeUrl(s.u);return u?`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer nofollow">${esc(s.n)}</a>`:esc(s.n);}).join(", ");
     const when = e.ongoing ? (e.movement==="ladakh"?"Since 2021":"Since "+fmtDate(e.date)) : fmtDate(e.date);
     return `<div class="item" role="button" tabindex="0" id="it-${esc(e.id)}" data-id="${esc(e.id)}" aria-expanded="${e.id===selected}">
@@ -423,16 +452,25 @@ function renderLegend(){
     `<button data-mov="${k}" aria-pressed="${!hidden.has(k)}"><span class="dot" style="background:${colorOf(k)}"></span>${m.label}</button>`).join("");
 }
 
-function select(id, fromMap){
-  selected = selected===id && !fromMap ? null : id;
+// dot clicked: show that place's reports (open the entry directly if there's only one)
+function openGroup(key){
+  const g = groups.get(key); if (!g) return;
+  placeFilter = g.events.length>1 ? key : null;
+  selected = g.events.length>1 ? null : g.lead.id;
+  render();
+  const el = placeFilter ? document.getElementById("list") : document.getElementById("it-"+selected);
+  if (placeFilter) el.scrollTop = 0; else el?.scrollIntoView({block:"nearest",behavior:"smooth"});
+  if (matchMedia("(max-width:860px)").matches) document.querySelector("aside").scrollIntoView({behavior:"smooth"});
+}
+function clearPlace(){ placeFilter = null; render(); }
+
+function select(id){
+  selected = selected===id ? null : id;
   render();
   const e = visible().find(x=>x.id===id);
   if (selected && e){
-    const el = document.getElementById("it-"+id); if (el && fromMap) el.scrollIntoView({block:"nearest",behavior:"smooth"});
-    if (!fromMap){
-      const w = VB0.w/Math.max(zoomK(),5), h = w*VB0.h/VB0.w;
-      animateTo({x:e._x-w/2, y:e._y-h/2, w, h}, 600);
-    }
+    const w = VB0.w/Math.max(zoomK(),5), h = w*VB0.h/VB0.w;
+    animateTo({x:e._x-w/2, y:e._y-h/2, w, h}, 600);
   }
 }
 
@@ -448,8 +486,9 @@ document.getElementById("legend").addEventListener("click",e=>{
 document.getElementById("tLive").onchange=e=>{showLive=e.target.checked;document.getElementById("tWeak").disabled=!showLive;render();};
 document.getElementById("tWeak").onchange=e=>{showWeak=e.target.checked;render();};
 const list=document.getElementById("list");
-list.addEventListener("click",e=>{ if(e.target.closest("a")) return; const it=e.target.closest(".item"); if(it) select(it.dataset.id,false); });
-list.addEventListener("keydown",e=>{ if((e.key==="Enter"||e.key===" ")&&e.target.classList.contains("item")){e.preventDefault();select(e.target.dataset.id,false);} });
+list.addEventListener("click",e=>{ if(e.target.closest("a")) return; if(e.target.id==="clearPlace") return clearPlace(); const it=e.target.closest(".item"); if(it) select(it.dataset.id); });
+list.addEventListener("keydown",e=>{ if((e.key==="Enter"||e.key===" ")&&e.target.classList.contains("item")){e.preventDefault();select(e.target.dataset.id);} });
+svg.addEventListener("click",()=>{ if(!dragMoved && placeFilter) clearPlace(); });
 const zoomCenter = f => animateTo(zoomAround(vb,f,vb.x+vb.w/2,vb.y+vb.h/2), 250);
 document.getElementById("zin").onclick=()=>zoomCenter(1.6);
 document.getElementById("zout").onclick=()=>zoomCenter(1/1.6);

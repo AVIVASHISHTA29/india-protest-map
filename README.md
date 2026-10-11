@@ -2,14 +2,17 @@
 
 A live, open-source map of protests across India. Every pin links to the news reporting behind it.
 
+- **Site:** https://avivashishta29.github.io/india-protest-map/
+- **Repo:** https://github.com/AVIVASHISHTA29/india-protest-map
+
 The map combines two layers:
 
 | Layer | Where it comes from | How it's updated | Shown as |
 |---|---|---|---|
 | **Checked entries** | Researched by hand from news reports | Edited in `data/curated.json` | ● Circles |
-| **News detections** | The [GDELT 2.0 Event Database](https://www.gdeltproject.org/) | Automatically, every 30 minutes | ◆ Diamonds |
+| **News detections** | The [GDELT 2.0 Event Database](https://www.gdeltproject.org/) | Automatically, every 30 minutes | ● Translucent dots |
 
-The whole project is static. A GitHub Action fetches the data and GitHub Pages hosts the site. There's no server, no database and no API key, and it costs nothing to run.
+The whole project is static. A GitHub Action fetches the data and GitHub Pages hosts the site. There's no server, no database, no API key and no npm dependencies, and it costs nothing to run.
 
 ---
 
@@ -26,6 +29,7 @@ The whole project is static. A GitHub Action fetches the data and GitHub Pages h
 - [Adding and reviewing protests](#adding-and-reviewing-protests)
 - [Configuration reference](#configuration-reference)
 - [Methodology and editorial approach](#methodology-and-editorial-approach)
+- [How live is it?](#how-live-is-it)
 - [Known limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 - [Ideas for what to build next](#ideas-for-what-to-build-next)
@@ -57,23 +61,27 @@ The whole project is static. A GitHub Action fetches the data and GitHub Pages h
 ```mermaid
 flowchart LR
     A[GDELT 2.0<br/>new export file<br/>every 15 min] -->|download zip| B[scripts/fetch-gdelt.mjs]
-    S[(data/state.json<br/>last file processed)] <--> B
+    S[(.cache/gdelt-state.json<br/>bookmark + groups<br/>Actions cache)] <--> B
     B -->|filter: protest + India<br/>group by day & place| L[(data/live.json)]
-    C[(data/curated.json<br/>hand-checked)] --> P
-    L --> P[index.html<br/>on GitHub Pages]
-    G[(data/india-states.geojson)] --> P
+    C[(data/curated.json<br/>hand-checked)] --> X
+    L --> X[scripts/build-site.mjs]
+    I[index.html<br/>map already inlined as SVG] --> X
+    X --> P[_site/<br/>on GitHub Pages]
+    G[(data/india-states.geojson)] -.one-off:<br/>scripts/build-map.mjs.-> I
     W[GitHub Action<br/>every 30 min] -.runs.-> B
-    W -.commits & deploys.-> P
+    W -.builds & deploys.-> P
 ```
 
 1. **GitHub Actions** runs `.github/workflows/update.yml` on a 30-minute schedule. It also runs on every push to `main` and whenever you trigger it manually.
-2. The workflow runs `scripts/fetch-gdelt.mjs`, which:
+2. The workflow restores the pipeline state from the **Actions cache**, then runs `scripts/fetch-gdelt.mjs`, which:
    - downloads every GDELT export file published since the last run,
    - keeps protests located in India,
-   - merges them into `data/live.json`.
-3. The workflow commits the updated `data/live.json` and `data/state.json` back to the repo, so the next run knows where it left off.
-4. It copies `index.html` and `data/` into `_site/` and deploys that folder to **GitHub Pages**.
-5. In the browser, `index.html` loads three files: the map shapes, the checked entries and the live detections. It draws them with D3.
+   - merges them into its working state (`.cache/gdelt-state.json`) and writes a slim `data/live.json` for the page.
+3. The workflow saves `.cache/` back to the Actions cache, so the next run knows where it left off. Nothing is committed to git.
+4. `scripts/build-site.mjs` builds `_site/`: it inlines the checked entries and live detections into `index.html`, prerenders recent entries into the list, and writes the sitemap. The workflow deploys that folder to **GitHub Pages**.
+5. In the browser, the map and data are already in the page, so the first load makes no extra requests. The page then re-fetches `data/live.json` every 5 minutes.
+
+The state outlines are not loaded at runtime. `scripts/build-map.mjs` projects `data/india-states.geojson` (Web Mercator) into SVG paths and writes them into `index.html` once. Pan, zoom and pinch are about 80 lines of plain JavaScript that move the SVG `viewBox`. There's no mapping library.
 
 ---
 
@@ -81,19 +89,23 @@ flowchart LR
 
 ```
 india-protest-map/
-├── index.html                      # The whole frontend (HTML + CSS + JS, uses D3 from cdnjs)
+├── index.html                      # The whole frontend (HTML + CSS + JS, map inlined as SVG)
+├── favicon.svg, og.png, apple-touch-icon.png
 ├── data/
 │   ├── curated.json                # Hand-checked protests (edit this)
-│   ├── live.json                   # Auto-generated news detections (don't edit)
-│   ├── state.json                  # Pipeline bookmark: last GDELT file processed (don't edit)
-│   └── india-states.geojson        # Simplified state/UT boundaries
+│   ├── live.json                   # Generated news detections (gitignored, don't edit)
+│   └── india-states.geojson        # State/UT boundaries; input to build-map.mjs only
 ├── scripts/
-│   └── fetch-gdelt.mjs             # The data pipeline
+│   ├── fetch-gdelt.mjs             # The data pipeline
+│   ├── build-site.mjs              # Builds _site/ for Pages
+│   └── build-map.mjs               # One-off: geojson -> SVG paths in index.html
 ├── .github/
-│   ├── workflows/update.yml        # Schedule, commit and deploy
+│   ├── workflows/update.yml        # Schedule, fetch, build and deploy
 │   └── ISSUE_TEMPLATE/
 │       └── report-protest.yml      # "Suggest a protest" form
-├── package.json                    # One dependency: fflate (for unzipping)
+├── .cache/gdelt-state.json         # Pipeline working state (gitignored, kept in Actions cache)
+├── _site/                          # Build output (gitignored)
+├── package.json                    # Scripts only; no dependencies
 └── README.md
 ```
 
@@ -101,7 +113,9 @@ india-protest-map/
 
 ## Quick start: deploy to GitHub Pages
 
-1. **Create a repo** on GitHub, e.g. `india-protest-map`, and push this folder:
+The project is already live at https://avivashishta29.github.io/india-protest-map/, built from https://github.com/AVIVASHISHTA29/india-protest-map. To run your own copy:
+
+1. **Fork or create a repo** on GitHub, e.g. `india-protest-map`, and push this folder:
    ```bash
    cd india-protest-map
    git init
@@ -112,13 +126,11 @@ india-protest-map/
    git push -u origin main
    ```
 2. **Turn on Pages.** In the repo, go to **Settings → Pages**. Under **Build and deployment → Source**, choose **GitHub Actions**.
-3. **Allow the workflow to push.** Go to **Settings → Actions → General → Workflow permissions** and select **Read and write permissions**. This lets the bot commit `live.json`.
-4. **Run the first update with a backfill.** Go to **Actions → Update live protest data → Run workflow** and set `backfill_hours` to `168`. This loads the past 7 days instead of the default 24 hours.
-5. **Open the site** at `https://<your-username>.github.io/india-protest-map/`.
+3. **Open the site** at `https://<your-username>.github.io/india-protest-map/`.
 
-From then on it updates itself. GitHub's scheduler can delay runs by a few minutes, or longer at busy times. That's normal.
+The first run finds no cached state, so it backfills the last 7 days on its own (about 10 seconds). From then on it updates itself. GitHub's scheduler can delay runs, sometimes by half an hour; see [How live is it?](#how-live-is-it).
 
-> The push in step 1 also triggers a run. That first run may fail if Pages isn't set up yet. Re-run it after step 3.
+> The push in step 1 also triggers a run. That first run may fail if Pages isn't set up yet. Re-run it after step 2 (**Actions → Update and deploy → Run workflow**).
 
 ---
 
@@ -126,26 +138,29 @@ From then on it updates itself. GitHub's scheduler can delay runs by a few minut
 
 Requires **Node.js 20+**, which has a built-in `fetch`.
 
-```bash
-npm install          # installs fflate
-npm run update       # fetches the last 24h of GDELT data into data/live.json
-npm run dev          # serves the folder at http://localhost:3000
-```
-
-The page loads its data with `fetch()`. Browsers block that on `file://` URLs, so always open it through a local server. Any static server works, e.g. `python3 -m http.server`.
-
-To fetch a whole week locally:
+There are no dependencies, so there's nothing to install.
 
 ```bash
-BACKFILL_HOURS=168 MAX_FILES=672 npm run update
+npm run update       # fetches GDELT data into data/live.json (last 7 days on the first run)
+npm run build        # builds _site/
+npm run dev          # builds, then serves _site at http://localhost:3000
 ```
 
-To start the pipeline from scratch, reset the bookmark and the data:
+Open the built page from `npm run dev`. A plain `index.html` opened on a `file://` URL has no inlined data and tries to `fetch()` it, which browsers block. Serving the repo folder with any static server (e.g. `python3 -m http.server`) also works, since the page then fetches `data/` itself.
+
+To fetch a shorter window locally:
 
 ```bash
-echo '{"lastStamp":null}' > data/state.json
-echo '{"generatedAt":null,"clusters":[]}' > data/live.json
+BACKFILL_HOURS=24 npm run update
 ```
+
+To start the pipeline from scratch, delete the working state:
+
+```bash
+rm -rf .cache
+```
+
+If you change the boundaries in `data/india-states.geojson`, re-run `node scripts/build-map.mjs` to rewrite the SVG in `index.html`. It prints the projection constants; copy them into `P` in the page script.
 
 ---
 
@@ -165,11 +180,13 @@ A new export file is published every 15 minutes at `http://data.gdeltproject.org
 
 `scripts/fetch-gdelt.mjs`:
 
-1. **Loads its saved state.** It reads `data/live.json` (existing groups) and `data/state.json` (the timestamp of the last file it processed).
+1. **Loads its saved state** from `.cache/gdelt-state.json`: the timestamp of the last file it processed, plus the existing groups (with their URL slugs).
 2. **Finds new files.** It reads GDELT's `lastupdate.txt` and lists every 15-minute timestamp between the bookmark and the latest file.
    - The list is capped at `MAX_FILES` per run.
-   - On a fresh start it goes back `BACKFILL_HOURS`.
-3. **Downloads and unzips each file** with `fflate`. Each file is tab-separated with 61 columns per row. Missing files (GDELT occasionally skips a slot) are logged and skipped.
+   - On a fresh start (no cache) it goes back `BACKFILL_HOURS`, 7 days by default.
+3. **Downloads and unzips the files**, `CONCURRENCY` (8) at a time, using Node's built-in `zlib`. Files are still applied in order. Each file is tab-separated with 61 columns per row.
+   - A 404 (GDELT occasionally skips a slot) is skipped.
+   - Any other download error stops the run there. The bookmark stays at the last file handled, so the next run retries.
 4. **Filters rows.** A row is kept only if all of these hold:
 
    | Check | Column | Rule |
@@ -200,28 +217,43 @@ A new export file is published every 15 minutes at `http://data.gdeltproject.org
      | 144 | Blockade or road obstruction |
      | 145 | Violent protest or riot |
 
-   - **Headline.** GDELT has no headlines, so the script reads one from the article URL slug. For example, `/students-protest-against-election-commission/article123.ece` becomes "Students protest against election commission". If no slug works, the page shows "Protest reported in &lt;place&gt;".
+   - **Headline.** GDELT has no headlines, so the script reads one from the article URL slug. For example, `/students-protest-against-election-commission/article123.ece` becomes "Students protest against election commission". It prefers a slug that contains a protest word (protest, strike, march, rally, dharna, bandh, detained…). If no slug works, the page shows "Protest reported in &lt;place&gt;".
    - **Issue.** Keyword matching on the URL slugs. The rules are in `MOVEMENT_RULES`:
-     - `sir`: election commission, CEC, voter, electoral, SIR, ballot, EVM…
+     - `sir`: election commission, CEC, voter, electoral, SIR, ballot, EVM, CJP, cockroach, Dipke…
      - `exam`: exam, paper leak, NEET, SSC, UPSC, NTA, CUET…
-     - `ladakh`: Ladakh, Leh, Kargil, sixth schedule
+     - `ladakh`: Ladakh, Leh, Kargil, sixth schedule, Wangchuk
      - `labour`: worker, wage, strike, union, farmer, kisan, MSP, Anganwadi, ASHA…
      - anything else is `other`
-7. **Prunes** groups older than `WINDOW_DAYS`, sorts newest first, caps the total at 3,000 groups, and writes `data/live.json`.
-8. **Saves the bookmark** to `data/state.json`. This way no file is processed twice and no article is counted twice.
+7. **Prunes** groups older than `WINDOW_DAYS`, sorts newest first and caps the total at 3,000 groups.
+8. **Saves** the bookmark and full groups to `.cache/gdelt-state.json`, so no file is processed twice and no article is counted twice. It also writes the slim `data/live.json` with only what the page renders.
 
 ### The workflow
 
 `.github/workflows/update.yml`:
 
+The workflow is called **Update and deploy**.
+
 - **Triggers:**
-  - every 30 minutes (`cron: "*/30 * * * *"`),
+  - every 30 minutes, at :07 and :37 (`cron: "7,37 * * * *"`; GitHub delays runs on the hour the most),
   - on every push to `main`,
-  - manually, with an optional `backfill_hours` input.
-- Uses `concurrency: update-and-deploy`, so runs never overlap or race to push.
-- Commits only if the data actually changed. It runs `git pull --rebase` first, so your own pushes in the meantime don't conflict.
-- Deploys only `index.html` and `data/` to Pages. `node_modules` and scripts aren't published.
-- Bot commits made with `GITHUB_TOKEN` don't trigger new workflow runs, so there is no infinite loop.
+  - manually, with an optional `reset` checkbox that ignores the cache and re-fetches the full 7-day window.
+- Uses `concurrency: update-and-deploy`, so runs never overlap.
+- Restores `.cache/` from the Actions cache, runs the fetch, saves `.cache/` again, then builds and deploys. The bot never commits, so the repo history stays clean.
+- Permissions: `contents: read`, `pages: write`, `id-token: write`, and `actions: write` (for the cache and the keepalive).
+- Passes the Pages URL from `actions/configure-pages` to the build as `SITE_URL`.
+- Deploys only `_site/`. Scripts and the cache aren't published.
+- **Keepalive.** GitHub disables scheduled workflows in public repos after 60 days without a commit. Once a day (the 00:xx UTC scheduled run) the workflow re-enables itself through the API, which resets that clock.
+
+### The site build
+
+`scripts/build-site.mjs` turns `index.html` and the data into `_site/`:
+
+- inlines `curated.json` and `live.json` into the page, so the first load needs no extra request,
+- prerenders recent checked entries and the best-sourced detections into the list, for crawlers and readers without JavaScript,
+- fills in the canonical and Open Graph URLs and JSON-LD (`WebSite` and `Dataset`),
+- writes `sitemap.xml` and `.nojekyll`, and copies `data/*.json`, `favicon.svg`, `og.png` and `apple-touch-icon.png`.
+
+There's no `robots.txt`. Crawlers only read it at the domain root, and a project Pages site lives under `/india-protest-map/`.
 
 ---
 
@@ -266,54 +298,50 @@ A new export file is published every 15 minutes at `http://data.gdeltproject.org
 
 ### `data/live.json`, the news detections (generated)
 
+This file is generated on every run and isn't committed (it's in `.gitignore`).
+
 ```json
 {
   "generatedAt": "2026-10-11T06:00:12.345Z",
+  "lastGdeltFile": "20261011061500",
   "source": "GDELT 2.0 Event Database",
   "windowDays": 7,
   "clusters": [
     {
       "id": "2026_10_11_28_6_77_2",
-      "key": "2026-10-11|28.6|77.2",
       "date": "2026-10-11",
       "lat": 28.6, "lng": 77.2, "geoType": 4,
-      "place": "New Delhi, Delhi", "adm1": "IN07",
+      "place": "New Delhi, Delhi",
       "articles": 18,
-      "codes": { "141": 6 },
+      "outlets": 2,
       "type": "141",
-      "urls": ["https://…"],
-      "domains": ["thehindu.com", "indianexpress.com"],
-      "slugs": ["…"],
-      "title": "Students protest against election commission sir deletions",
       "movement": "sir",
-      "firstSeen": "20261011054500",
-      "lastSeen": "20261011061500"
+      "title": "Students protest against election commission sir deletions",
+      "urls": ["https://…"]
     }
   ]
 }
 ```
 
-### `data/state.json`
+`outlets` is the number of distinct outlet domains. `urls` holds at most 4 source links.
 
-```json
-{ "lastStamp": "20261011061500" }
-```
+### `.cache/gdelt-state.json`
 
-This is the timestamp of the last GDELT file processed. Set it to `null` to start over.
+The pipeline's full working state: `lastStamp` (the last GDELT file processed) and every group with its URL slugs, domains, CAMEO code counts and first/last-seen times. It lives in the Actions cache between runs and is never published or committed. Delete it (or tick `reset` on a manual run) to start over.
 
 ### `data/india-states.geojson`
 
-The boundaries of 37 states and UTs, from [datta07/INDIAN-SHAPEFILES](https://github.com/datta07/INDIAN-SHAPEFILES). They were simplified to about 4% of the original detail with [mapshaper](https://mapshaper.org/), which keeps the file around 40 KB. The polygon rings were rewound to the winding order D3 expects. Each feature has one property, `name`.
+The boundaries of 37 states and UTs, from [datta07/INDIAN-SHAPEFILES](https://github.com/datta07/INDIAN-SHAPEFILES). They were simplified to about 4% of the original detail with [mapshaper](https://mapshaper.org/), which keeps the file around 40 KB. Each feature has one property, `name`. The page doesn't load this file; it's only the input to `scripts/build-map.mjs`.
 
 ---
 
 ## The frontend
 
-`index.html` is a single file with no build step. It uses:
+`index.html` is a single file. It works as-is from a local server; `scripts/build-site.mjs` only inlines the data and fills in URLs for the deployed copy. It uses:
 
-- **D3 v7.8.5** from cdnjs, for map projection, drawing and zoom,
+- an inline SVG of the state outlines, pre-projected by `scripts/build-map.mjs`,
 - **Anek Latin** (headlines) and **Hind** (body) from Google Fonts, both designed with Indian scripts in mind,
-- plain JavaScript for everything else.
+- plain JavaScript for everything else, including pan, zoom and pinch (it moves the SVG `viewBox`).
 
 ### Pins
 
@@ -322,17 +350,18 @@ The boundaries of 37 states and UTs, from [datta07/INDIAN-SHAPEFILES](https://gi
 | ● solid circle, pulsing | Checked entry from the last 2 days |
 | ● solid circle, faded | Older checked entry |
 | ◌ dashed ring | Long-running movement |
-| ◆ diamond | News detection. Bigger means more outlets; faded means a single outlet. |
+| ● translucent dot | News detection only. Very faint means single-outlet reports. |
+| Number in a dot | Several reports at the same spot, merged into one dot. Bigger dot, more reports. |
 | Colour | The issue: amber = voter rolls / EC, blue = exam leaks, teal = workers & farmers, purple = Ladakh, grey = other |
 
-Pins at nearly the same spot are nudged apart in a small spiral so they don't hide each other. Pins shrink slightly as you zoom in, so dense cities stay readable.
+Reports at the same spot (within about 3 km) are merged into one dot, so every dot stays at its true location. Click a merged dot to filter the list to that place; "Show all places" or a click on empty map clears it.
 
 ### Behaviour
 
 - **Time ranges** are based on the viewer's current date. Ongoing movements always show.
 - **Single-outlet detections** are hidden by default. Groups covered by one outlet are the noisiest part of GDELT.
 - The list is sorted newest first. Checked entries come before detections on the same day, and ongoing movements are at the end. It shows at most 400 items.
-- `data/live.json` is re-fetched every 5 minutes, with cache-busting.
+- The deployed page starts with the data inlined, then re-fetches `data/live.json` every 5 minutes, with cache-busting.
 - The status line goes grey and warns if the data is more than 3 hours old.
 - On `*.github.io`, the **Suggest a protest** link works out your repo from the URL. On a custom domain, set `REPO_OVERRIDE` at the top of the script, e.g. `"yourname/india-protest-map"`.
 
@@ -348,7 +377,7 @@ Pins at nearly the same spot are nudged apart in a small spiral so they don't hi
 
 There are three ways a protest gets onto the map:
 
-1. **Automatically.** GDELT picks up news coverage, and it appears as a diamond within about 30–60 minutes of being indexed.
+1. **Automatically.** GDELT picks up news coverage, and it appears as a translucent dot, usually 30–90 minutes after first reporting (see [How live is it?](#how-live-is-it)).
 2. **Reader suggestions.** Readers use the **Suggest a protest** form. Each suggestion becomes a GitHub issue labelled `protest-report`, with headline, place, date, issue, summary and source link.
 3. **Checked entries.** You add an object to `data/curated.json` and push. The site redeploys within a couple of minutes.
 
@@ -370,16 +399,23 @@ For a big detection (many outlets) that deserves context, add a checked entry fo
 | Variable | Default | What it does |
 |---|---|---|
 | `WINDOW_DAYS` | `7` | How many days of detections to keep in `live.json` |
-| `MAX_FILES` | `96` (24h) | Max 15-minute GDELT files processed per run |
-| `BACKFILL_HOURS` | `24` | On a fresh start (no bookmark), how far back to fetch |
+| `BACKFILL_HOURS` | `WINDOW_DAYS × 24` (168) | On a fresh start (no cache), how far back to fetch |
+| `MAX_FILES` | `BACKFILL_HOURS × 4` (672) | Max 15-minute GDELT files processed per run |
+| `CONCURRENCY` | `8` | Files downloaded in parallel |
 | `GDELT_BASE` | `http://data.gdeltproject.org/gdeltv2/` | Download location. Override it to test against a local mirror. |
 
 ### Workflow
 
 | Setting | Where | Default |
 |---|---|---|
-| Schedule | `on.schedule.cron` in `update.yml` | every 30 minutes |
-| Manual backfill | "Run workflow" → `backfill_hours` | 24. Use 168 for a week. A manual run also raises `MAX_FILES` to 672. |
+| Schedule | `on.schedule.cron` in `update.yml` | `7,37 * * * *` (every 30 minutes) |
+| Reset | "Run workflow" → `reset` | off. On ignores the cache and re-fetches the full 7-day window. |
+
+### Site build
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SITE_URL` | from `GITHUB_REPOSITORY`, else `http://localhost:3000/` | Base URL for canonical/OG links, JSON-LD and the sitemap. The workflow passes the Pages URL. |
 
 ### Frontend
 
@@ -403,6 +439,18 @@ The map is meant to be a reliable record that people of any political view can c
 
 ---
 
+## How live is it?
+
+Roughly 30–90 minutes behind the news, not real time:
+
+- GDELT publishes a new file every 15 minutes, but it already lags the news itself by about 15–60 minutes.
+- The workflow is scheduled every 30 minutes, but GitHub often starts scheduled runs 5–30 minutes late, sometimes more.
+- GitHub Pages' CDN can cache the page and `live.json` for up to 10 minutes.
+
+Auto-detections are also noisy. Expect geocoding errors, stories about older protests, and the same article mapped to several places. Treat an auto-detected dot as a pointer to reporting, not a confirmed event.
+
+---
+
 ## Known limitations
 
 - **GDELT is automated and noisy:**
@@ -414,8 +462,8 @@ The map is meant to be a reliable record that people of any political view can c
 - **Coverage is uneven.** GDELT leans on English-language and online outlets. Rural and regional-language protests are under-counted.
 - **Issue tags are keyword guesses** from URLs. Many real protests land in "Other issues".
 - **There are no crowd or detention numbers** for detections. GDELT doesn't provide them.
-- **GitHub's scheduler isn't exact.** Runs can be delayed. GitHub also **pauses scheduled workflows in public repos after 60 days with no repository activity**. If updates stop, re-enable the workflow in the Actions tab, or push any commit.
-- **Repo size grows slowly**, because `live.json` is committed on every change. If it ever matters, squash the history of the data files or move the data to a separate branch.
+- **GitHub's scheduler isn't exact.** Runs can be delayed. GitHub also pauses scheduled workflows in public repos after 60 days without a commit; the daily keepalive step re-enables the workflow to prevent that. If updates still stop, re-enable it in the Actions tab.
+- **The Actions cache can be evicted** (after 7 days unused, or when the repo goes over its cache quota). The next run then backfills 7 days from scratch, which takes about 10 seconds.
 
 ---
 
@@ -423,14 +471,15 @@ The map is meant to be a reliable record that people of any political view can c
 
 | Symptom | Likely cause and fix |
 |---|---|
-| "Live news data hasn't been generated yet" | The workflow hasn't run successfully. Go to Actions → Update live protest data → Run workflow, then check the log. |
-| Workflow fails at **Commit updated data** with a 403 | Turn on **Read and write permissions** under Settings → Actions → General. |
+| "Live news data hasn't been generated yet" | The workflow hasn't run successfully. Go to Actions → Update and deploy → Run workflow, then check the log. |
 | Workflow fails at **deploy-pages** | Set Settings → Pages → Source to **GitHub Actions**, then re-run. |
-| Log shows `Skipping … 404` lines | Normal. GDELT occasionally skips a 15-minute slot. |
+| Log shows `Stopping at … Will retry next run` | A GDELT download failed (not a 404). The bookmark didn't advance past it, so the next run picks it up. Missing slots (404) are skipped silently. |
+| Detections look wrong or duplicated after a change to the script | Run the workflow manually with `reset` ticked to rebuild the state from scratch. |
 | `Could not read GDELT lastupdate.txt` | GDELT is down or changed its format. The next run will retry. If it persists, open `http://data.gdeltproject.org/gdeltv2/lastupdate.txt` in a browser and compare. |
 | Status says updates may be paused | Check the Actions tab for failed or disabled runs (see the 60-day note above). |
-| Map is blank locally | You opened `index.html` directly. Serve it with `npm run dev`. |
-| Very few detections | Tick "Include single-outlet reports", widen the time range, or do a 168-hour backfill. |
+| No data locally | You opened `index.html` directly. Use `npm run dev`. |
+| Very few detections | Tick "Include single-outlet reports" or widen the time range. |
+| Site shows old data right after a run | The Pages CDN can cache for up to 10 minutes. Wait, or hard-refresh. |
 | "Suggest a protest" link missing | You're on a custom domain or localhost. Set `REPO_OVERRIDE`. |
 
 ---
@@ -451,7 +500,6 @@ The map is meant to be a reliable record that people of any political view can c
 
 - **Event data:** [The GDELT Project](https://www.gdeltproject.org/). GDELT data is free to use; please credit "The GDELT Project".
 - **Boundaries:** [datta07/INDIAN-SHAPEFILES](https://github.com/datta07/INDIAN-SHAPEFILES), simplified with [mapshaper](https://github.com/mbloch/mapshaper).
-- **Libraries:** [D3](https://d3js.org/) (ISC), [fflate](https://github.com/101arrowz/fflate) (MIT).
 - **Fonts:** [Anek Latin](https://fonts.google.com/specimen/Anek+Latin) and [Hind](https://fonts.google.com/specimen/Hind) (SIL Open Font License).
 - **Checked entries** are summaries of reporting by the outlets linked in each entry.
 
