@@ -75,13 +75,16 @@ replaceOnce("<!--LIST-->", listHTML);
 await fs.rm("_site", { recursive: true, force: true });
 await fs.mkdir("_site/data", { recursive: true });
 await fs.writeFile("_site/index.html", html);
-for (const f of ["data/curated.json", "data/live.json", "favicon.svg", "og.png", "apple-touch-icon.png", "vercel.json"]) {
+for (const f of ["data/curated.json", "data/live.json", "favicon.svg", "og.png", "apple-touch-icon.png"]) {
   await fs.copyFile(f, `_site/${f}`).catch(() => console.warn(`missing ${f}`));
 }
 await fs.writeFile("_site/sitemap.xml",
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
   + `  <url><loc>${SITE_URL}</loc><lastmod>${(live.generatedAt || now).slice(0, 10)}</lastmod><changefreq>hourly</changefreq></url>\n</urlset>\n`);
 await fs.writeFile("_site/.nojekyll", "");
+// _site is uploaded to Vercel as-is, so its vercel.json keeps the headers but drops the build settings.
+const { buildCommand, installCommand, outputDirectory, framework, ...vercel } = await readJSON("vercel.json", {});
+await fs.writeFile("_site/vercel.json", JSON.stringify(vercel, null, 2));
 
 const kb = (await fs.stat("_site/index.html")).size / 1024;
 console.log(`Built _site for ${SITE_URL} (index.html ${kb.toFixed(0)} KB, ${items.length} prerendered entries)`);
