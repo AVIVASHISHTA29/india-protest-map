@@ -1,0 +1,5 @@
+node_modules/
+_site/
+.cache/
+data/live.json
+.DS_Store
