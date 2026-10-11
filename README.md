@@ -2,7 +2,7 @@
 
 A live, open-source map of protests across India. Every pin links to the news reporting behind it.
 
-- **Site:** https://avivashishta29.github.io/india-protest-map/
+- **Site:** https://india-protest-map.vercel.app/
 - **Repo:** https://github.com/AVIVASHISHTA29/india-protest-map
 
 The map combines two layers:
@@ -113,7 +113,7 @@ india-protest-map/
 
 ## Quick start: deploy to GitHub Pages
 
-The project is already live at https://avivashishta29.github.io/india-protest-map/, built from https://github.com/AVIVASHISHTA29/india-protest-map. To run your own copy:
+The project is already live at https://india-protest-map.vercel.app/, built from https://github.com/AVIVASHISHTA29/india-protest-map. To run your own copy:
 
 1. **Fork or create a repo** on GitHub, e.g. `india-protest-map`, and push this folder:
    ```bash
@@ -127,6 +127,16 @@ The project is already live at https://avivashishta29.github.io/india-protest-ma
    ```
 2. **Turn on Pages.** In the repo, go to **Settings → Pages**. Under **Build and deployment → Source**, choose **GitHub Actions**.
 3. **Open the site** at `https://<your-username>.github.io/india-protest-map/`.
+
+### Also deploying to Vercel (optional)
+
+The same workflow run can push the built `_site/` to Vercel, so both hosts update every 30 minutes from one pipeline. Vercel's own Git builds are switched off in `vercel.json` (they'd only rebuild on commits, and the data changes without commits).
+
+1. Create a Vercel project (or reuse one) and note its **Project ID** (Project → Settings → General) and **Team ID** (Team → Settings → General).
+2. Add repo **variables** `VERCEL_PROJECT_ID`, `VERCEL_ORG_ID`, and optionally `SITE_URL` (the canonical URL used in meta tags and the sitemap, e.g. `https://your-project.vercel.app/`; defaults to the Pages URL).
+3. Create a token at https://vercel.com/account/tokens and add it as the repo **secret** `VERCEL_TOKEN` (`gh secret set VERCEL_TOKEN`).
+
+Without the secret, the Vercel step is skipped.
 
 The first run finds no cached state, so it backfills the last 7 days on its own (about 10 seconds). From then on it updates itself. GitHub's scheduler can delay runs, sometimes by half an hour; see [How live is it?](#how-live-is-it).
 

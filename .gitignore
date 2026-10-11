@@ -3,3 +3,4 @@ _site/
 .cache/
 data/live.json
 .DS_Store
+.vercel/

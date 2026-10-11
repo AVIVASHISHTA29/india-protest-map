@@ -75,7 +75,7 @@ replaceOnce("<!--LIST-->", listHTML);
 await fs.rm("_site", { recursive: true, force: true });
 await fs.mkdir("_site/data", { recursive: true });
 await fs.writeFile("_site/index.html", html);
-for (const f of ["data/curated.json", "data/live.json", "favicon.svg", "og.png", "apple-touch-icon.png"]) {
+for (const f of ["data/curated.json", "data/live.json", "favicon.svg", "og.png", "apple-touch-icon.png", "vercel.json"]) {
   await fs.copyFile(f, `_site/${f}`).catch(() => console.warn(`missing ${f}`));
 }
 await fs.writeFile("_site/sitemap.xml",
